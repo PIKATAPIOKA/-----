@@ -107,12 +107,12 @@ def show_file_message(msg):
 
 def show_reactions(msg, index, user_name):
     emojis = [
-        "( ¯꒳¯ )ｂ",
-        "♡(˘︶˘).｡.:*♡",
-        "ꉂꉂ(˃ᗜ˂*)ｱﾊﾊ",
-        "(lll-ω-)",
-        "(ꐦ°᷄д°᷅)",
-        "(๑•̀ㅂ•́)و✧",
+        "👍",
+        "❤️",
+        "😂",
+        "😮",
+        "😢",
+        "🎉",
     ]
 
     # reactionsの形式
