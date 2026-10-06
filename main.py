@@ -1,136 +1,303 @@
-import random
-import string
-import threading
-from datetime import datetime
-
 import streamlit as st
 
-st.set_page_config(page_title="連絡ツール", page_icon="💬")
+from components.room import create_room, join_room, leave_room, get_room
+from components.chat import send_message, show_messages
+from components.reactions import add_reaction
+from components.files import save_uploaded_file
+from components.call import show_call
 
 
-# 全ユーザーで共有されるデータ(サーバー再起動で消えます)
-@st.cache_resource
-def get_store():
-    return {"rooms": {}, "lock": threading.Lock()}
+st.set_page_config(
+    page_title="連絡ツール",
+    page_icon="💬",
+    layout="wide",
+)
 
 
-store = get_store()
+# ============================================================
+# 初期化
+# ============================================================
 
-
-def make_code(length=6):
-    chars = string.ascii_uppercase + string.digits
-    while True:
-        code = "".join(random.choices(chars, k=length))
-        if code not in store["rooms"]:
-            return code
-
-
-# ---------- 入室画面 ----------
 if "room" not in st.session_state:
-    st.title("💬 連絡ツール")
-    st.write("ミーティングコードを入力して参加、または新しく作成してください。")
+    st.session_state.room = None
 
-    name = st.text_input("あなたの名前")
-    code_input = st.text_input(
-        "ミーティングコード", help="作成時は空欄でOK(自動で発行されます)"
+if "name" not in st.session_state:
+    st.session_state.name = None
+
+
+# ============================================================
+# ログイン・部屋作成画面
+# ============================================================
+
+if st.session_state.room is None:
+
+    st.title("💬 連絡ツール")
+
+    st.write(
+        "ミーティングコードを使って部屋を作成・参加できます。"
+    )
+
+    name = st.text_input(
+        "名前",
+        placeholder="例：Kan",
+    )
+
+    code = st.text_input(
+        "ミーティングコード",
+        placeholder="作成するときは空欄でOK",
     ).strip().upper()
 
     col1, col2 = st.columns(2)
 
-    if col1.button("➕ 作成", use_container_width=True):
-        if not name.strip():
-            st.error("名前を入力してください")
-        else:
-            with store["lock"]:
-                code = code_input or make_code()
-                if code in store["rooms"]:
-                    st.error("そのコードはすでに使われています")
+    # --------------------------------------------------------
+    # 部屋作成
+    # --------------------------------------------------------
+
+    with col1:
+        if st.button(
+            "➕ 部屋を作成",
+            use_container_width=True,
+        ):
+
+            if not name.strip():
+
+                st.error("名前を入力してください。")
+
+            else:
+
+                new_code = create_room(
+                    code=code,
+                    name=name.strip(),
+                )
+
+                if new_code is None:
+
+                    st.error(
+                        "そのミーティングコードはすでに使われています。"
+                    )
+
                 else:
-                    store["rooms"][code] = {"messages": [], "members": {name.strip()}}
-                    st.session_state.room = code
+
+                    st.session_state.room = new_code
                     st.session_state.name = name.strip()
+
                     st.rerun()
 
-    if col2.button("🚪 参加", use_container_width=True):
-        if not name.strip():
-            st.error("名前を入力してください")
-        elif code_input not in store["rooms"]:
-            st.error("そのコードの部屋は見つかりません")
-        else:
-            with store["lock"]:
-                store["rooms"][code_input]["members"].add(name.strip())
-            st.session_state.room = code_input
-            st.session_state.name = name.strip()
-            st.rerun()
+    # --------------------------------------------------------
+    # 部屋参加
+    # --------------------------------------------------------
+
+    with col2:
+
+        if st.button(
+            "🚪 部屋に参加",
+            use_container_width=True,
+        ):
+
+            if not name.strip():
+
+                st.error("名前を入力してください。")
+
+            elif not code:
+
+                st.error("ミーティングコードを入力してください。")
+
+            elif join_room(
+                code=code,
+                name=name.strip(),
+            ):
+
+                st.session_state.room = code
+                st.session_state.name = name.strip()
+
+                st.rerun()
+
+            else:
+
+                st.error(
+                    "そのミーティングコードの部屋がありません。"
+                )
 
     st.stop()
 
 
-# ---------- チャット画面 ----------
-code = st.session_state.room
-name = st.session_state.name
-room = store["rooms"].get(code)
+# ============================================================
+# 部屋情報
+# ============================================================
+
+room_code = st.session_state.room
+user_name = st.session_state.name
+
+room = get_room(room_code)
+
 
 if room is None:
-    st.warning("この部屋は存在しません(サーバーが再起動された可能性があります)")
-    del st.session_state["room"]
-    st.stop()
+
+    st.error(
+        "部屋が見つかりません。"
+        "サーバーが再起動された可能性があります。"
+    )
+
+    st.session_state.room = None
+    st.session_state.name = None
+
+    st.rerun()
+
+
+# ============================================================
+# サイドバー
+# ============================================================
 
 with st.sidebar:
+
+    st.title("💬 連絡ツール")
+
     st.subheader("ミーティングコード")
-    st.code(code, language=None)
-    st.caption("このコードを相手に伝えてください")
 
+    st.code(
+        room_code,
+        language=None,
+    )
 
-    @st.fragment(run_every=2)
-    def show_members():
-        st.write("**参加者**")
-        for m in sorted(room["members"]):
-            st.write(("🟢 " if m == name else "👤 ") + m)
+    st.caption(
+        "このコードを相手に伝えてください。"
+    )
 
+    st.divider()
 
-    show_members()
+    st.subheader("👥 参加者")
 
-    if st.button("退出"):
-        del st.session_state["room"]
-        del st.session_state["name"]
+    for member in sorted(room["members"]):
+
+        if member == user_name:
+
+            st.write(
+                f"🟢 {member}（あなた）"
+            )
+
+        else:
+
+            st.write(
+                f"🟢 {member}"
+            )
+
+    st.divider()
+
+    if st.button(
+        "🚪 退出",
+        use_container_width=True,
+    ):
+
+        leave_room(
+            room_code,
+            user_name,
+        )
+
+        st.session_state.room = None
+        st.session_state.name = None
+
         st.rerun()
 
-st.title(f"💬 {code}")
+
+# ============================================================
+# メイン画面
+# ============================================================
+
+st.title(
+    f"💬 ミーティング {room_code}"
+)
+
+st.caption(
+    f"ログイン中：{user_name}"
+)
 
 
-@st.fragment(run_every=2)
-def show_messages():
-    others = room["members"] - {name}
-    for msg in room["messages"]:
-        is_me = msg["sender"] == name
+# ============================================================
+# タブ
+# ============================================================
 
-        # 他人のメッセージを表示した時点で既読にする
-        if not is_me:
-            msg["read_by"].add(name)
-
-        with st.chat_message("user" if is_me else "assistant"):
-            st.markdown(f"**{msg['sender']}**  `{msg['time']}`")
-            st.write(msg["text"])
-            if is_me:
-                if not others:
-                    st.caption("相手の参加待ち")
-                elif msg["read_by"]:
-                    st.caption("✅ 既読: " + ", ".join(sorted(msg["read_by"])))
-                else:
-                    st.caption("未読")
+chat_tab, call_tab = st.tabs(
+    [
+        "💬 チャット",
+        "📹 通話",
+    ]
+)
 
 
-show_messages()
+# ============================================================
+# チャット
+# ============================================================
 
-if text := st.chat_input("メッセージを入力"):
-    with store["lock"]:
-        room["messages"].append(
-            {
-                "sender": name,
-                "text": text,
-                "time": datetime.now().strftime("%H:%M"),
-                "read_by": set(),
-            }
+with chat_tab:
+
+    show_messages(
+        room_code,
+        user_name,
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # ファイル
+    # --------------------------------------------------------
+
+    uploaded_file = st.file_uploader(
+        "📎 ファイル・画像を送信",
+        type=[
+            "png",
+            "jpg",
+            "jpeg",
+            "gif",
+            "webp",
+            "pdf",
+            "txt",
+            "zip",
+            "csv",
+        ],
+    )
+
+    if uploaded_file is not None:
+
+        if st.button("📤 ファイルを送信"):
+
+            save_uploaded_file(
+                room_code,
+                user_name,
+                uploaded_file,
+            )
+
+            st.success(
+                "ファイルを送信しました。"
+            )
+
+            st.rerun()
+
+    # --------------------------------------------------------
+    # メッセージ
+    # --------------------------------------------------------
+
+    message = st.chat_input(
+        "メッセージを入力..."
+    )
+
+    if message:
+
+        send_message(
+            room_code,
+            user_name,
+            message,
         )
-    st.rerun()
+
+        st.rerun()
+
+
+# ============================================================
+# 通話
+# ============================================================
+
+with call_tab:
+
+    show_call(
+        room_code,
+        user_name,
+    )
